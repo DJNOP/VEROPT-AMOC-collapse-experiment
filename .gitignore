@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+*.swp
+.DS_Store
+
+# Veros / Veropt outputs and heavy stuff
+*.nc
+*.h5
+*.hdf5
+*.log
+logs/
+slurm-*.out
+slurm-*.err
+
+checkpoints/
+runs/
+results/
+output/
+experiment_outputs/

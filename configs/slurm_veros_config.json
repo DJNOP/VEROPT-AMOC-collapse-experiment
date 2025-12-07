@@ -1,0 +1,26 @@
+{
+  "work_root": "/lustre/hpc/ocean/nicholas/veropt_runs",
+  "partition_name": "aegir",
+  "group_name": "ocean",
+  "constraint": "v2",
+
+  "n_cores": 6,
+  "n_cores_nx": 3,
+  "n_cores_ny": 2,
+
+  "n_cycles": 1,
+  "cycle_length": 43200,
+
+  "max_tries": 2,
+  "backend": "numpy",
+  "float_type": "float32",
+
+  "batch_script_template": "/groups/ocean/nicholas/amoc_collapse_exp/configs/run_veros_template.sbatch",
+  "veros_cmd": "/groups/ocean/nicholas/.conda/envs/veros_nicholas/bin/veros run",
+
+  "log_level": "INFO",
+  "template_substitutions": {
+    "python": "/groups/ocean/nicholas/.conda/envs/veros_nicholas/bin/python",
+    "loglevel": "info"
+  }
+}

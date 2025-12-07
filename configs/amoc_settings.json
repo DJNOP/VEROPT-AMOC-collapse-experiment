@@ -1,0 +1,17 @@
+{
+  "output_filename": "indicators.json",
+  "target": {
+    "target_amoc_Sv": 0.0
+  },
+  "latlon_boxes": {
+    "AMOC_z_bounds_m": [
+      500.0,
+      2000.0
+    ],
+    "AMOC_lat_degN": 26.5,
+    "AMOC_basin": "atl"
+  },
+  "objective_weights": {
+    "AMOC": 1.0
+  },
+  "run_years": 50}
