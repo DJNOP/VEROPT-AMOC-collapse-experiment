@@ -29,13 +29,20 @@
       "low": 1e-6,
       "high": 3.16e-3,
       "log": false
+    },
+    "sss_offset": {
+      "type": "float",
+      "low": 0.3,
+      "high": 1.0,
+      "log": false
     }
   },
   "parameter_names": [
     "c_k",
     "eke_c_k",
     "eke_c_eps",
-    "kappaH_min"
+    "kappaH_min",
+    "sss_offset"
   ],
   "parameter_bounds": {
     "c_k": [
@@ -53,6 +60,10 @@
     "kappaH_min": [
       1e-6,
       3.16e-3
+    ],
+    "sss_offset": [
+      0.3,
+      1.0
     ]
   },
   "params_filename": "params.json",

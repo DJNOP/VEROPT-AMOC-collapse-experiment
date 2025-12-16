@@ -10,34 +10,14 @@ CTRL_AVG = BASE / "no_hosing" / "global_4deg.averages.nc"
 HOSE_AVG = BASE / "hosing"    / "global_4deg.averages.nc"
 
 
-def load_surface_sss(path: Path):
-    """Return (lat, zonal-mean surface salinity) from last year."""
-    with xr.open_dataset(path, decode_times=False, decode_timedelta=False) as ds:
-        salt = ds["salt"]  # dims: Time, z, y, x (names may differ slightly)
-
-        # figure out dim names robustly
-        tdim = next(d for d in salt.dims if d.lower().startswith("time"))
-        zdim = next(d for d in salt.dims if d.lower().startswith("z"))
-        ydim = next(d for d in salt.dims if d.lower().startswith("y"))
-        xdim = next(d for d in salt.dims if d.lower().startswith("x"))
-
-        # last time, surface level (z = -1)
-        surf = salt.isel({tdim: -1, zdim: -1})
-
-        # zonal mean, skip land (NaNs)
-        surf_zonal = surf.mean(dim=xdim, skipna=True)
-
-        lat = ds[ydim].values
-        sss = surf_zonal.values
-
-    return lat, sss
+import Helper_functions as hf
 
 
 print("Loading control run SSS ...")
-lat_ctrl, sss_ctrl = load_surface_sss(CTRL_AVG)
+lat_ctrl, sss_ctrl = hf.load_surface_sss(CTRL_AVG)
 
 print("Loading hosing run SSS ...")
-lat_hose, sss_hose = load_surface_sss(HOSE_AVG)
+lat_hose, sss_hose = hf.load_surface_sss(HOSE_AVG)
 
 if not np.allclose(lat_ctrl, lat_hose):
     raise ValueError("Latitude grids differ between control and hosing runs")

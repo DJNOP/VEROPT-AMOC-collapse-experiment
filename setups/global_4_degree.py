@@ -10,10 +10,12 @@ from veros.core.operators import numpy as npx, update, at
 BASE_PATH = os.path.dirname(os.path.realpath(__file__))
 DATA_FILES = veros.tools.get_assets("global_4deg", os.path.join(BASE_PATH, "assets.json"))
 
-OUT_EVERY_YEARS = float(os.environ.get("OUT_EVERY_YEARS", "1"))
+# output interval in years (default 1)
+OUT_EVERY_YEARS = float(os.environ.get("OUT_EVERY_YEARS", "1.0"))
 
-# --- Veropt runtime params loader -------------------------------------------------
+
 def _load_params():
+    """Read Veropt params if present (params.json pointed to by VEROPT_PARAMS_FILE)."""
     pfile = os.environ.get("VEROPT_PARAMS_FILE", "params.json")
     return json.load(open(pfile)) if os.path.exists(pfile) else {}
 
@@ -21,9 +23,6 @@ def _load_params():
 class GlobalFourDegreeSetup(VerosSetup):
     """Global 4 degree model with 15 vertical levels (adapted from pyOM2)."""
 
-    # ------------------------------------------------------------------
-    # Parameters
-    # ------------------------------------------------------------------
     @veros_routine
     def set_parameter(self, state):
         settings = state.settings
@@ -36,8 +35,8 @@ class GlobalFourDegreeSetup(VerosSetup):
         settings.dt_mom = 1800.0
         settings.dt_tracer = 86400.0
 
-        YEARS = float(os.environ.get("RUN_YEARS", 50))
-        settings.runlen = YEARS * 360.0 * 86400.0  # ensure we hit an output
+        YEARS = float(os.environ.get("RUN_YEARS", "50"))
+        settings.runlen = YEARS * 360.0 * 86400.0
 
         settings.x_origin = 4.0
         settings.y_origin = -76.0
@@ -103,29 +102,21 @@ class GlobalFourDegreeSetup(VerosSetup):
             tauy=Variable("tauy", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
         )
 
-        # --- SSS hosing parameter (freshwater experiment) ----------------
-        # Environment default; 0.0 = control run
-        # Units: psu, negative = freshening north of 50°N
+        # SSS hosing amplitude:
+        # Convention: SSS_OFFSET > 0 means "freshen" by subtracting that many psu north of 50N
         self.sss_offset_parameter = float(os.environ.get("SSS_OFFSET", "0.0"))
 
-        # ---- runtime overrides from Veropt --------------------------------------
+        # runtime overrides from Veropt
         rp = _load_params()
         if rp:
-            # TKE
             if "c_k" in rp:
                 settings.c_k = float(rp["c_k"])
-
-            # Horizontal background diffusivity
             if "kappaH_min" in rp:
                 settings.kappaH_min = float(rp["kappaH_min"])
-
-            # EKE
             if "eke_c_k" in rp:
                 settings.eke_c_k = float(rp["eke_c_k"])
             if "eke_c_eps" in rp:
                 settings.eke_c_eps = float(rp["eke_c_eps"])
-
-            # SSS hosing amplitude (negative = freshening)
             if "sss_offset" in rp:
                 self.sss_offset_parameter = float(rp["sss_offset"])
 
@@ -138,17 +129,11 @@ class GlobalFourDegreeSetup(VerosSetup):
                 f"sss_offset={self.sss_offset_parameter}"
             )
 
-    # ------------------------------------------------------------------
-    # Helper to read forcing
-    # ------------------------------------------------------------------
     def _read_forcing(self, var):
         with h5netcdf.File(DATA_FILES["forcing"], "r") as infile:
             var_obj = infile.variables[var]
             return npx.array(var_obj).T
 
-    # ------------------------------------------------------------------
-    # Grid
-    # ------------------------------------------------------------------
     @veros_routine
     def set_grid(self, state):
         vs = state.variables
@@ -159,9 +144,6 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs.dxt = 4.0 * npx.ones_like(vs.dxt)
         vs.dyt = 4.0 * npx.ones_like(vs.dyt)
 
-    # ------------------------------------------------------------------
-    # Coriolis
-    # ------------------------------------------------------------------
     @veros_routine
     def set_coriolis(self, state):
         vs = state.variables
@@ -172,9 +154,6 @@ class GlobalFourDegreeSetup(VerosSetup):
             2 * settings.omega * npx.sin(vs.yt[npx.newaxis, :] / 180.0 * settings.pi),
         )
 
-    # ------------------------------------------------------------------
-    # Topography
-    # ------------------------------------------------------------------
     @veros_routine(dist_safe=False, local_variables=["kbot", "zt"])
     def set_topography(self, state):
         vs = state.variables
@@ -184,39 +163,23 @@ class GlobalFourDegreeSetup(VerosSetup):
         salt_data = self._read_forcing("salinity")[:, :, ::-1]
 
         land_mask = (vs.zt[npx.newaxis, npx.newaxis, :] <= bathymetry_data[..., npx.newaxis]) | (salt_data == 0.0)
-
         vs.kbot = update(vs.kbot, at[2:-2, 2:-2], 1 + npx.sum(land_mask.astype("int"), axis=2))
 
-        # set all-land cells
         all_land_mask = (bathymetry_data == 0) | (vs.kbot[2:-2, 2:-2] == settings.nz)
         vs.kbot = update(vs.kbot, at[2:-2, 2:-2], npx.where(all_land_mask, 0, vs.kbot[2:-2, 2:-2]))
 
-    # ------------------------------------------------------------------
-    # Initial conditions (includes SSS hosing)
-    # ------------------------------------------------------------------
     @veros_routine(
         dist_safe=False,
         local_variables=[
-            "taux",
-            "tauy",
-            "qnec",
-            "qnet",
-            "sss_clim",
-            "sst_clim",
-            "temp",
-            "salt",
-            "area_t",
-            "maskT",
-            "forc_iw_bottom",
-            "forc_iw_surface",
-            "yt",
+            "taux", "tauy", "qnec", "qnet", "sss_clim", "sst_clim",
+            "temp", "salt", "area_t", "maskT",
+            "forc_iw_bottom", "forc_iw_surface", "yt",
         ],
     )
     def set_initial_conditions(self, state):
         vs = state.variables
         settings = state.settings
 
-        # ----- initial T and S -----
         temp_data = self._read_forcing("temperature")[:, :, ::-1]
         vs.temp = update(
             vs.temp,
@@ -231,11 +194,9 @@ class GlobalFourDegreeSetup(VerosSetup):
             salt_data[..., npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis],
         )
 
-        # ----- wind stress -----
         vs.taux = update(vs.taux, at[2:-2, 2:-2, :], self._read_forcing("tau_x"))
         vs.tauy = update(vs.tauy, at[2:-2, 2:-2, :], self._read_forcing("tau_y"))
 
-        # ----- heat flux -----
         with h5netcdf.File(DATA_FILES["ecmwf"], "r") as ecmwf_data:
             qnec_var = ecmwf_data.variables["Q3"]
             vs.qnec = update(vs.qnec, at[2:-2, 2:-2, :], npx.array(qnec_var).T)
@@ -253,22 +214,23 @@ class GlobalFourDegreeSetup(VerosSetup):
         logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
         vs.qnet = (vs.qnet - mean_flux) * vs.maskT[:, :, -1, npx.newaxis]
 
-        # ----- SST / SSS climatology with optional SSS hosing -----
-        sst_data = self._read_forcing("sst")   # (nx-4, ny-4, 12)
-        sss_data = self._read_forcing("sss")   # (nx-4, ny-4, 12)
+        # SST/SSS climatologies + hosing north of 50N
+        sst_data = self._read_forcing("sst")
+        sss_data = self._read_forcing("sss")
 
-        offset = getattr(self, "sss_offset_parameter", 0.0)  # psu; negative = freshening
+        offset = float(getattr(self, "sss_offset_parameter", 0.0))  # psu
         if offset != 0.0:
             lat0 = 50.0
-            yt_inner = vs.yt[2:-2]                          # (ny-4,)
+            yt_inner = vs.yt[2:-2]  # (ny-4,)
             mask_1d = (yt_inner >= lat0).astype(sss_data.dtype)
             mask_3d = mask_1d[npx.newaxis, :, npx.newaxis]  # (1, ny-4, 1)
-            sss_data = sss_data + offset * mask_3d          # apply offset north of 50°N
+
+            # SSS_OFFSET > 0 => freshen: subtract offset north of 50N
+            sss_data = sss_data - offset * mask_3d
 
         vs.sst_clim = update(vs.sst_clim, at[2:-2, 2:-2, :], sst_data)
         vs.sss_clim = update(vs.sss_clim, at[2:-2, 2:-2, :], sss_data)
 
-        # ----- internal wave forcing (optional) -----
         if settings.enable_idemix:
             vs.forc_iw_bottom = update(
                 vs.forc_iw_bottom,
@@ -281,21 +243,14 @@ class GlobalFourDegreeSetup(VerosSetup):
                 self._read_forcing("wind_energy") / settings.rho_0 * 0.2,
             )
 
-    # ------------------------------------------------------------------
-    # Forcing (uses already-hosed vs.sss_clim)
-    # ------------------------------------------------------------------
     @veros_routine
     def set_forcing(self, state):
-        vs = state.variables
-        vs.update(set_forcing_kernel(state))
+        state.variables.update(set_forcing_kernel(state))
 
-    # ------------------------------------------------------------------
-    # Diagnostics
-    # ------------------------------------------------------------------
     @veros_routine
     def set_diagnostics(self, state):
         settings = state.settings
-        out_every = OUT_EVERY_YEARS * 360.0 * 86400.0  # yearly outputs
+        out_every = OUT_EVERY_YEARS * 360.0 * 86400.0
 
         state.diagnostics["snapshot"].output_frequency = out_every
 
@@ -310,75 +265,68 @@ class GlobalFourDegreeSetup(VerosSetup):
         state.diagnostics["averages"].output_frequency = out_every
         state.diagnostics["averages"].sampling_frequency = 86400.0
 
-    # ------------------------------------------------------------------
-    # After timestep hook (unused)
-    # ------------------------------------------------------------------
     @veros_routine
     def after_timestep(self, state):
         pass
 
 
-# ----------------------------------------------------------------------
-# Kernel for forcing (surface fluxes, wind, etc.)
-# ----------------------------------------------------------------------
 @veros_kernel
 def set_forcing_kernel(state):
     vs = state.variables
     settings = state.settings
 
-    year_in_seconds = 360 * 86400.0
+    year_in_seconds = 360.0 * 86400.0
     (n1, f1), (n2, f2) = veros.tools.get_periodic_interval(
         vs.time, year_in_seconds, year_in_seconds / 12.0, 12
     )
 
-    # wind stress
-    vs.surface_taux = f1 * vs.taux[:, :, n1] + f2 * vs.taux[:, :, n2]
-    vs.surface_tauy = f1 * vs.tauy[:, :, n1] + f2 * vs.tauy[:, :, n2]
+    # monthly interpolation (DON'T assign to vs.* in kernels)
+    surface_taux = f1 * vs.taux[:, :, n1] + f2 * vs.taux[:, :, n2]
+    surface_tauy = f1 * vs.tauy[:, :, n1] + f2 * vs.tauy[:, :, n2]
 
-    # TKE surface flux
+    forc_tke_surface = vs.forc_tke_surface
     if settings.enable_tke:
-        vs.forc_tke_surface = update(
-            vs.forc_tke_surface,
+        forc_tke_surface = update(
+            forc_tke_surface,
             at[1:-1, 1:-1],
             npx.sqrt(
-                (0.5 * (vs.surface_taux[1:-1, 1:-1] + vs.surface_taux[:-2, 1:-1]) / settings.rho_0) ** 2
-                + (0.5 * (vs.surface_tauy[1:-1, 1:-1] + vs.surface_tauy[1:-1, :-2]) / settings.rho_0) ** 2
+                (0.5 * (surface_taux[1:-1, 1:-1] + surface_taux[:-2, 1:-1]) / settings.rho_0) ** 2
+                + (0.5 * (surface_tauy[1:-1, 1:-1] + surface_tauy[1:-1, :-2]) / settings.rho_0) ** 2
             ) ** 1.5,
         )
 
-    # heat flux : W/m^2 K kg/J m^3/kg = K m/s
     cp_0 = 3991.86795711963
     sst  = f1 * vs.sst_clim[:, :, n1] + f2 * vs.sst_clim[:, :, n2]
     qnec = f1 * vs.qnec[:, :, n1]     + f2 * vs.qnec[:, :, n2]
     qnet = f1 * vs.qnet[:, :, n1]     + f2 * vs.qnet[:, :, n2]
 
-    vs.forc_temp_surface = (
+    forc_temp_surface = (
         (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau]))
         * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
 
-    # salinity restoring (uses already-hosed vs.sss_clim)
-    t_rest = 30 * 86400.0
+    t_rest = 30.0 * 86400.0
     sss = f1 * vs.sss_clim[:, :, n1] + f2 * vs.sss_clim[:, :, n2]
-    vs.forc_salt_surface = (
-        1.0 / t_rest
+    forc_salt_surface = (
+        (1.0 / t_rest)
         * (sss - vs.salt[:, :, -1, vs.tau])
         * vs.maskT[:, :, -1]
         * vs.dzt[-1]
     )
 
     # ice mask
-    mask = npx.logical_and(
+    ice_mask = npx.logical_and(
         vs.temp[:, :, -1, vs.tau] * vs.maskT[:, :, -1] < -1.8,
-        vs.forc_temp_surface < 0.0,
+        forc_temp_surface < 0.0,
     )
-    vs.forc_temp_surface = npx.where(mask, 0.0, vs.forc_temp_surface)
-    vs.forc_salt_surface = npx.where(mask, 0.0, vs.forc_salt_surface)
+    forc_temp_surface = npx.where(ice_mask, 0.0, forc_temp_surface)
+    forc_salt_surface = npx.where(ice_mask, 0.0, forc_salt_surface)
 
     return KernelOutput(
-        surface_taux=vs.surface_taux,
-        surface_tauy=vs.surface_tauy,
-        forc_tke_surface=vs.forc_tke_surface,
-        forc_temp_surface=vs.forc_temp_surface,
-        forc_salt_surface=vs.forc_salt_surface,
+        surface_taux=surface_taux,
+        surface_tauy=surface_tauy,
+        forc_tke_surface=forc_tke_surface,
+        forc_temp_surface=forc_temp_surface,
+        forc_salt_surface=forc_salt_surface,
     )
+

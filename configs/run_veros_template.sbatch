@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH -A ocean
 #SBATCH -p aegir
-#SBATCH --constraint=v2
+#SBATCH --constraint=v3
 #SBATCH --job-name=veropt_veros
 #SBATCH --time=23:59:59
 #SBATCH --nodes=1

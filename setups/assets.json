@@ -6,6 +6,5 @@
   "ecmwf": {
     "url": "https://sid.erda.dk/share_redirect/gsdZADr8to/global_4deg/ecmwf_4deg_monthly_nc4.nc",
     "md5": "d1b4e0e199d7a5883cf7c88d3d6bcb27"
-  },
-  "batch_script_template": "#!/bin/bash -l\n#SBATCH -A ocean\n#SBATCH -p aegir\n#SBATCH --constraint=v1\n#SBATCH --job-name=veropt_veros\n#SBATCH --time=23:59:59\n#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --output=slurm-%j.out\n#SBATCH --error=slurm-%j.err\n\nset -e\necho \"===== SLURM JOB STARTED =====\"\necho \"Job ID: $SLURM_JOB_ID\"\necho \"Node: $(hostname)\"\n\n# run from the directory this script lives in (the point dir)\nSCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\ncd \"$SCRIPT_DIR\"\necho \"Work dir: $(pwd)\"\n\nml purge || true\nml --ignore-cache load miniconda/python3.11 || true\neval \"$(conda shell.bash hook)\" || true\nconda activate /groups/ocean/nicholas/conda/envs/veropt_311 || exit 1\n\npython - <<'PY'\nimport sys, veros, mpi4py\nprint(\"sys.executable:\", sys.executable)\nprint(\"veros\", veros.__version__)\nprint(\"mpi4py OK\")\nPY\n\nNT=\"$SLURM_NTASKS\"\nif [ -z \"$NT\" ]; then NT=1; fi\necho \"Launching Veros with $NT task(s)\u2026\"\nsrun -n \"$NT\" veros run global_4_degree.py\n"
+  }
 }

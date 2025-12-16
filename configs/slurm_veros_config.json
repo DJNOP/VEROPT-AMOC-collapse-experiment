@@ -2,7 +2,7 @@
   "work_root": "/lustre/hpc/ocean/nicholas/veropt_runs",
   "partition_name": "aegir",
   "group_name": "ocean",
-  "constraint": "v2",
+  "constraint": "v3",
 
   "n_cores": 6,
   "n_cores_nx": 3,
