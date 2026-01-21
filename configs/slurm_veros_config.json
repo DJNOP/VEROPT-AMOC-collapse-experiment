@@ -4,7 +4,7 @@
   "group_name": "ocean",
   "constraint": "v3",
 
-  "n_cores": 6,
+  "n_cores": 8,
   "n_cores_nx": 3,
   "n_cores_ny": 2,
 

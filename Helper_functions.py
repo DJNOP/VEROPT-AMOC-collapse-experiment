@@ -46,10 +46,12 @@ def find_averages_nc(run_dir: Path) -> Path:
     """
     Locate the averages file (e.g. global_4deg.averages.nc) in a directory.
 
-    Search order (matches your scripts):
+    Search order:
       1) run_dir/global_4deg.averages.nc
       2) first match in ("*averages*.nc", "*.averages.nc")
     """
+    run_dir = Path(run_dir)
+
     explicit = run_dir / "global_4deg.averages.nc"
     if explicit.exists():
         return explicit
@@ -60,6 +62,26 @@ def find_averages_nc(run_dir: Path) -> Path:
             return hits[0]
 
     raise FileNotFoundError(f"No averages file found under {run_dir}")
+
+
+def open_averages(nc: str | Path) -> xr.Dataset:
+    """
+    Open an averages dataset with an engine fallback.
+    Works even if netCDF4-python isn't installed.
+    """
+    nc = Path(nc)
+    last_err: Exception | None = None
+
+    for engine in ("h5netcdf", "scipy"):
+        try:
+            return xr.open_dataset(nc, engine=engine, decode_timedelta=True)
+        except Exception as e:
+            last_err = e
+
+    try:
+        return xr.open_dataset(nc, decode_timedelta=True)
+    except Exception as e:
+        raise ValueError(f"Could not open averages file: {nc}") from (last_err or e)
 
 
 # ---------------------------------------------------------------------
@@ -93,13 +115,18 @@ def open_overturning(nc: str | Path) -> xr.Dataset:
         with open_overturning(path) as ds: ...
     """
     nc = Path(nc)
-    try:
-        return xr.open_dataset(nc, engine="h5netcdf", decode_timedelta=True)
-    except Exception as e:
+    last_err: Exception | None = None
+
+    for engine in ("h5netcdf", "scipy"):
         try:
-            return xr.open_dataset(nc, decode_timedelta=True)
-        except Exception:
-            raise ValueError(f"Could not open overturning file: {nc}") from e
+            return xr.open_dataset(nc, engine=engine, decode_timedelta=True)
+        except Exception as e:
+            last_err = e
+
+    try:
+        return xr.open_dataset(nc, decode_timedelta=True)
+    except Exception as e:
+        raise ValueError(f"Could not open overturning file: {nc}") from (last_err or e)
 
 
 def pick_vsf_depth(ds: xr.Dataset) -> xr.DataArray:
@@ -162,7 +189,6 @@ def safe_depth_window(
 ) -> xr.DataArray:
     """
     Apply a depth window ONLY if z looks like meters (|z| > ~2).
-    This matches the defensive behaviour in indicators.py.
     """
     if z_bounds_m is None or zdim not in da.dims:
         return da
@@ -180,7 +206,6 @@ def safe_depth_window(
         return da
 
     lo, hi = sorted(map(float, z_bounds_m))
-    # Veros often stores depth negative down
     if np.nanmedian(zvals) < 0:
         lo, hi = -hi, -lo
 
@@ -264,16 +289,6 @@ def prepare_overturning_section(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, str]:
     """
     Load an overturning section (vsf_depth) for a run/point directory.
-
-    Returns
-    -------
-    lat : 1D np.ndarray
-    depth : 1D np.ndarray (positive down)
-    field : 2D np.ndarray with shape (depth, lat)
-    used_lat : float
-        Model latitude nearest to target_lat.
-    label : str
-        Year/time label.
     """
     nc = find_overturning_nc(run_dir)
     with open_overturning(nc) as ds:
@@ -299,7 +314,6 @@ def prepare_overturning_section(
         lat = np.asarray(da.coords[ydim].values, dtype=float)
         field = np.asarray(da.transpose(ydim, zdim).values, dtype=float).T
 
-        # nearest latitude for guide line
         _, used_lat = lat_select_nearest(da, ydim, target_lat)
 
     return lat, depth, field, used_lat, label
@@ -315,28 +329,50 @@ def prepare_zonal_section(
     """
     Load a zonal-mean section (lat x depth) from an averages file.
 
-    Returns
-    -------
-    lat : 1D np.ndarray
-    depth : 1D np.ndarray (positive down)
-    field : 2D np.ndarray, shape (depth, lat)
-    label : str
+    IMPORTANT:
+    - You may pass either a directory (point_dir) OR the averages file.
+      If a directory is passed, we locate the averages file first.
+    - If the variable still has an x-dimension (xt/xu), we take the zonal mean here.
+    - If any other extra dims remain (rare), we reduce them defensively.
     """
-    with xr.open_dataset(averages_nc) as ds:
+    averages_nc = Path(averages_nc)
+    if averages_nc.is_dir():
+        averages_nc = find_averages_nc(averages_nc)
+
+    with open_averages(averages_nc) as ds:
         if varname not in ds:
             raise KeyError(f"{varname} not in {averages_nc.name}: {list(ds.data_vars)}")
         da = ds[varname]
 
-        # pick dims by prefix
-        ydim = _coord_dim(da, "y")
-        zdim = _coord_dim(da, "z")
+        # Identify main section dims
+        ydim = _coord_dim(da, "y")  # yt/yu
+        zdim = _coord_dim(da, "z")  # zt/zw
 
+        # Select requested time
         da, label = select_time_and_label(da, time_index, label_mode=label_mode)
+
+        # Zonal mean if x-dims exist (xt/xu or similar)
+        xdims = [d for d in da.dims if d.lower().startswith("x")]
+        for xd in xdims:
+            da = da.mean(dim=xd, skipna=True)
+
+        # Defensive reduction for any leftover dims beyond (y,z)
+        extra = [d for d in da.dims if d not in (ydim, zdim)]
+        for d in extra:
+            if da.sizes.get(d, 1) > 1:
+                da = da.mean(dim=d, skipna=True)
+            else:
+                da = da.isel({d: 0})
+
+        # Now we should be strictly 2D (y,z) in some order
+        if ydim not in da.dims or zdim not in da.dims:
+            raise ValueError(f"After reduction, dims are {list(da.dims)} (expected to include {ydim} and {zdim})")
 
         z = np.asarray(da.coords[zdim].values, dtype=float)
         depth = depth_axis_from_z(z)
         lat = np.asarray(da.coords[ydim].values, dtype=float)
 
+        # Make (depth, lat) with transpose then .T
         field = np.asarray(da.transpose(ydim, zdim).values, dtype=float).T
 
     return lat, depth, field, label
@@ -344,20 +380,24 @@ def prepare_zonal_section(
 
 def load_surface_sss(averages_nc: Path, *, time_index: int = -1) -> np.ndarray:
     """Load surface SSS (1D over latitude) from averages file."""
-    with xr.open_dataset(averages_nc) as ds:
+    averages_nc = Path(averages_nc)
+    if averages_nc.is_dir():
+        averages_nc = find_averages_nc(averages_nc)
+
+    with open_averages(averages_nc) as ds:
         if "salt" not in ds:
             raise KeyError(f"'salt' not found in {averages_nc.name}")
         da = ds["salt"]
 
-        # dims: (time, z, y, x) or similar; pick surface (z=0) and zonal mean (x mean)
-        if _time_dim(da) in da.dims:
-            da = da.isel({_time_dim(da): time_index})
+        tdim = _time_dim(da)
+        if tdim in da.dims:
+            da = da.isel({tdim: time_index})
         if any(d.lower().startswith("z") for d in da.dims):
             zdim = _coord_dim(da, "z")
             da = da.isel({zdim: 0})
-        if any(d.lower().startswith("x") for d in da.dims):
-            xdim = _coord_dim(da, "x")
-            da = da.mean(dim=xdim, skipna=True)
+        xdims = [d for d in da.dims if d.lower().startswith("x")]
+        for xd in xdims:
+            da = da.mean(dim=xd, skipna=True)
 
         return np.asarray(da.values, dtype=float)
 
@@ -434,8 +474,6 @@ def infer_run_dir_and_settings_path(
 ) -> Tuple[str | Path, str | Path]:
     """
     Infer (run_dir, settings_path) from the same calling patterns you used before.
-
-    This is a *behaviour-preserving* extraction of the logic in indicators.compute_loss_for_run.
     """
     settings_path = kwargs.get("settings_path") or default_settings_path
     run_dir = kwargs.get("run_dir") or kwargs.get("path") or kwargs.get("dir")

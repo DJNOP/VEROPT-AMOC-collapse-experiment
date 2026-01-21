@@ -1,35 +1,21 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 
 # Editor / OS
 *.swp
 .DS_Store
 
-# Veros / Veropt outputs and heavy stuff
-*.nc
-*.h5
-*.hdf5
-*.log
+# Logs / Slurm
 logs/
+*.log
 slurm-*.out
 slurm-*.err
 
-checkpoints/
-runs/
-results/
-output/
-experiment_outputs/
-
-# Veros / Veropt outputs and heavy stuff
+# Veros / Veropt heavy outputs
 *.nc
 *.h5
 *.hdf5
-*.log
-
-logs/
-slurm-*.out
-slurm-*.err
 
 checkpoints/
 runs/

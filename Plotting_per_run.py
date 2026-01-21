@@ -13,7 +13,7 @@ from result_processing import indicators as ind
 # ------------------------------------------------------------
 RUN_DIR = Path(
     "/groups/ocean/nicholas/amoc_collapse_exp/runs/"
-    "global4deg_amoc-20251130-210803"
+    "global4deg_amoc-20260104-162248"
 )
 # ------------------------------------------------------------
 
@@ -21,7 +21,18 @@ TARGET_LAT = 26.5
 CMAP = "viridis"
 LEVELS = 36
 TIME_INDEX = -1
-SETTINGS_PATH = Path("configs/amoc_settings.json")
+
+# Make SETTINGS_PATH robust regardless of where you run the script from
+PROJECT_DIR = RUN_DIR.parents[1]  # .../amoc_collapse_exp
+SETTINGS_PATH = PROJECT_DIR / "configs" / "amoc_settings.json"
+
+
+def _point_key(p: Path) -> int:
+    """Numeric sort key for point_### directories."""
+    try:
+        return int(p.name.split("_", 1)[1])
+    except Exception:
+        return 10**18
 
 
 def plot_last_year_overturning(point_dir: Path) -> Path:
@@ -63,30 +74,51 @@ def plot_last_year_overturning(point_dir: Path) -> Path:
 
 
 def make_amoc_timeseries(point_dir: Path) -> tuple[Path, Path]:
+    """
+    Compute a simple AMOC time series by running your existing
+    ind._calculate_amoc on each time slice of vsf_depth.
+    """
     s = hf.read_json(SETTINGS_PATH)
 
-    nc = ind._find_overturning_nc(point_dir)
-    ds = ind._open_overturning(nc)
-    da = ind._pick_var(ds)
+    nc = hf.find_overturning_nc(point_dir)
+    with hf.open_overturning(nc) as ds:
+        da = hf.pick_vsf_depth(ds)
 
-    tdim = ind._time_dim(da)
-    ydim = ind._lat_dim(da)
-    zdim = ind._z_dim(da)
+        # Convert to Sv if needed
+        fac = hf.units_to_sv(da)
+        if fac != 1.0:
+            da = da * fac
+            da.attrs["units"] = "Sv"
 
-    ntime = da.sizes.get(tdim, 1) if tdim in da.dims else 1
-    vals, used_lat = [], np.nan
+        # Infer dim names robustly
+        tdim = hf._time_dim(da) or "Time"
+        ydim = next((d for d in da.dims if d.lower().startswith("y")), None)
+        zdim = next((d for d in da.dims if d.lower().startswith("z")), None)
+        if ydim is None or zdim is None:
+            raise ValueError(f"Could not infer lat/depth dims from {list(da.dims)}")
 
-    for i in range(ntime):
-        v_i = da.isel({tdim: slice(i, i + 1)}) if tdim in da.dims else da
-        out = ind._calculate_amoc(v_i, settings=s, lat_dim=ydim, z_dim=zdim, time_dim=tdim)
-        vals.append(float(out.get("amoc_sv", np.nan)))
-        if np.isnan(used_lat) and "used_lat_deg" in out:
-            used_lat = float(out["used_lat_deg"])
+        ntime = int(da.sizes.get(tdim, 1)) if tdim in da.dims else 1
 
-    ds.close()
+        vals: list[float] = []
+        used_lat = float("nan")
 
-    years = np.arange(1, len(vals) + 1, dtype=int)
+        for i in range(ntime):
+            v_i = da.isel({tdim: slice(i, i + 1)}) if tdim in da.dims else da
+            out = ind._calculate_amoc(
+                v_i,
+                settings=s,
+                lat_dim=ydim,
+                z_dim=zdim,
+                time_dim=tdim if tdim in v_i.dims else None,
+            )
+            vals.append(float(out.get("amoc_sv", np.nan)))
+            if np.isnan(used_lat) and "used_lat_deg" in out:
+                used_lat = float(out["used_lat_deg"])
+
     amoc = np.asarray(vals, dtype=float)
+
+    # Use time coordinate if it looks like "years"; otherwise fall back to 1..N
+    years = np.arange(1, len(amoc) + 1, dtype=int)
 
     out_csv = point_dir / "amoc_timeseries.csv"
     with open(out_csv, "w", newline="") as fh:
@@ -133,6 +165,7 @@ def plot_last_year_zonal_temperature(
     levels: int = LEVELS,
     time_index: int = TIME_INDEX,
 ) -> Path:
+    # IMPORTANT: prepare_zonal_section can now take a directory and will find the averages file
     lat, depth, field, year_label = hf.prepare_zonal_section(
         point_dir,
         varname="temp",
@@ -140,6 +173,7 @@ def plot_last_year_zonal_temperature(
         label_mode="year_number",
     )
 
+    # Try to annotate with AMOC location star/line
     try:
         olat, odepth, ofield, used_lat_star, _ = hf.prepare_overturning_section(
             point_dir,
@@ -152,13 +186,14 @@ def plot_last_year_zonal_temperature(
         k_star = int(np.nanargmax(np.abs(ofield[:, j])))
         depth_star = float(odepth[k_star])
     except Exception:
-        used_lat_star = depth_star = None
+        used_lat_star = None
+        depth_star = None
 
     fig, ax = plt.subplots(figsize=(13, 5.5))
     cf = ax.contourf(lat, depth, field, levels=levels, cmap=cmap)
     ax.invert_yaxis()
 
-    if used_lat_star is not None:
+    if used_lat_star is not None and depth_star is not None:
         ax.axvline(used_lat_star, ls="--", c="k", lw=1.1, alpha=0.7)
         ax.scatter([used_lat_star], [depth_star], marker="*", s=120, c="k", zorder=5)
 
@@ -180,9 +215,10 @@ def main() -> None:
     base = RUN_DIR / "global4deg_amoc" / "results"
     print(f"Using results directory: {base}")
 
-    for p in sorted(base.glob("point_*")):
-        if not p.is_dir():
-            continue
+    points = [p for p in base.glob("point_*") if p.is_dir()]
+    points = sorted(points, key=_point_key)
+
+    for p in points:
         print(f"\n=== {p.name} ===")
 
         try:

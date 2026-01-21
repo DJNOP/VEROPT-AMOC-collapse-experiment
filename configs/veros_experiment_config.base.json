@@ -32,8 +32,8 @@
     },
     "sss_offset": {
       "type": "float",
-      "low": 0.3,
-      "high": 1.0,
+      "low": 0.0,
+      "high": 0.3,
       "log": false
     }
   },
@@ -62,8 +62,8 @@
       3.16e-3
     ],
     "sss_offset": [
-      0.3,
-      1.0
+      0.0,
+      0.3
     ]
   },
   "params_filename": "params.json",

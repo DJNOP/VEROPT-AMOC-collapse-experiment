@@ -4,9 +4,9 @@
 #SBATCH --constraint=v3
 #SBATCH --job-name=veropt_veros
 #SBATCH --time=23:59:59
-#SBATCH --nodes=1
+#SBATCH --nodes=1 
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=8
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
 #SBATCH --chdir=.

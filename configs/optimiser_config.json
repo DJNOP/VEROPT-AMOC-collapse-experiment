@@ -1,5 +1,5 @@
 {
-  "n_initial_points": 18,
-  "n_bayesian_points": 90,
-  "n_evaluations_per_step": 6
+  "n_initial_points": 120,
+  "n_bayesian_points": 420,
+  "n_evaluations_per_step": 12
 }

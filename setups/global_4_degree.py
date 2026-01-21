@@ -13,6 +13,9 @@ DATA_FILES = veros.tools.get_assets("global_4deg", os.path.join(BASE_PATH, "asse
 # output interval in years (default 1)
 OUT_EVERY_YEARS = float(os.environ.get("OUT_EVERY_YEARS", "1.0"))
 
+# SSS hosing parameter (psu). Veropt will overwrite this line in copied setup files.
+SSS_OFFSET = 0.0
+
 
 def _load_params():
     """Read Veropt params if present (params.json pointed to by VEROPT_PARAMS_FILE)."""
@@ -104,7 +107,7 @@ class GlobalFourDegreeSetup(VerosSetup):
 
         # SSS hosing amplitude:
         # Convention: SSS_OFFSET > 0 means "freshen" by subtracting that many psu north of 50N
-        self.sss_offset_parameter = float(os.environ.get("SSS_OFFSET", "0.0"))
+        self.sss_offset_parameter = float(os.environ.get("SSS_OFFSET", SSS_OFFSET))
 
         # runtime overrides from Veropt
         rp = _load_params()
@@ -329,4 +332,3 @@ def set_forcing_kernel(state):
         forc_temp_surface=forc_temp_surface,
         forc_salt_surface=forc_salt_surface,
     )
-
